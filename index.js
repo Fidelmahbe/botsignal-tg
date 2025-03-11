@@ -4,7 +4,7 @@ import fs from 'fs/promises';
 import path from 'path';
 
 const DUNE_API_URL = 'https://api.dune.com/api/v1/query/4833321/results?limit=10&refresh=true';
-const MIN_MCAP = 50000; // 70K USD
+const MIN_MCAP = 70000; // 70K USD
 const TOKEN_RETENTION_DAYS = 7; // Lưu token trong 7 ngày
 
 // Được cung cấp qua GitHub Secrets
