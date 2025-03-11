@@ -16,7 +16,19 @@ const POSTED_TOKENS_FILE = path.resolve('posted_tokens.json');
 async function loadPostedTokens() {
   try {
     const data = await fs.readFile(POSTED_TOKENS_FILE, 'utf-8');
+    if (!data.trim()) {
+      console.log('File posted_tokens.json is empty, initializing as empty array');
+      await fs.writeFile(POSTED_TOKENS_FILE, JSON.stringify([]));
+      return new Set();
+    }
+
     const tokensWithTimestamps = JSON.parse(data);
+    if (!Array.isArray(tokensWithTimestamps)) {
+      console.log('File posted_tokens.json contains invalid data, resetting to empty array');
+      await fs.writeFile(POSTED_TOKENS_FILE, JSON.stringify([]));
+      return new Set();
+    }
+
     console.log('Loaded tokens from file:', tokensWithTimestamps);
 
     const now = new Date();
@@ -39,6 +51,10 @@ async function loadPostedTokens() {
       await fs.writeFile(POSTED_TOKENS_FILE, JSON.stringify([]));
       console.log('Created new posted_tokens.json file');
       return new Set();
+    } else if (error instanceof SyntaxError) {
+      console.error('File posted_tokens.json contains invalid JSON, resetting to empty array:', error);
+      await fs.writeFile(POSTED_TOKENS_FILE, JSON.stringify([]));
+      return new Set();
     }
     console.error('Error loading posted tokens:', error);
     return new Set();
@@ -50,9 +66,26 @@ async function savePostedTokens(postedTokensSet) {
     let tokensWithTimestamps = [];
     try {
       const data = await fs.readFile(POSTED_TOKENS_FILE, 'utf-8');
-      tokensWithTimestamps = JSON.parse(data);
+      if (!data.trim()) {
+        console.log('File posted_tokens.json is empty, initializing as empty array');
+        tokensWithTimestamps = [];
+      } else {
+        tokensWithTimestamps = JSON.parse(data);
+        if (!Array.isArray(tokensWithTimestamps)) {
+          console.log('File posted_tokens.json contains invalid data, resetting to empty array');
+          tokensWithTimestamps = [];
+        }
+      }
     } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
+      if (error.code === 'ENOENT') {
+        console.log('File posted_tokens.json does not exist, creating new file');
+        tokensWithTimestamps = [];
+      } else if (error instanceof SyntaxError) {
+        console.error('File posted_tokens.json contains invalid JSON, resetting to empty array:', error);
+        tokensWithTimestamps = [];
+      } else {
+        throw error;
+      }
     }
 
     const now = new Date().toISOString();
