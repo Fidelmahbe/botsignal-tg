@@ -1,18 +1,47 @@
-name: Fetch Tokens from Moralis with Twitter Automation
+name: Fetch Tokens from Moralis
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '*/5 * * * *' # Kiểm tra token và gửi Telegram mỗi 5 phút
+    - cron: '*/5 * * * *' # Chạy mỗi 5 phút
+  workflow_dispatch:
 
 jobs:
-  fetch-and-post:
+  fetch-tokens:
     runs-on: ubuntu-latest
-    concurrency: fetch-and-post
+
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PAT_TOKEN }}
+
+      - name: Log cron start
+        run: echo "Cron job started at $(date -u)"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '18'
-      - run: npm install
-      - run: node index.js
+
+      - name: Check file permissions
+        run: ls -la
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run script
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MORALIS_API_KEY: ${{ secrets.MORALIS_API_KEY }} # Thêm Moralis API Key
+        run: npm start
+
+      - name: Commit and push changes
+        run: |
+          git config --global user.name 'GitHub Action'
+          git config --global user.email 'action@github.com'
+          git add posted_tokens.json
+          git commit -m 'Update posted tokens at $(date -u)' || echo "No changes to commit"
+          git push origin main
+        env:
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
