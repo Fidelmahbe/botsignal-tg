@@ -127,7 +127,7 @@ async function fetchTokens() {
     };
 
     const exchange = 'pumpfun';
-    const response = await fetch(`https://solana-gateway.moralis.io/token/mainnet/exchange/${exchange}/graduated`, options);
+    const response = await fetch(`https://solana-gateway.moralis.io/token/mainnet/exchange/${exchange}/graduated?limit=10`, options);
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
