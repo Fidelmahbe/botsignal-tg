@@ -1,16 +1,21 @@
 import { Telegraf } from 'telegraf';
 import fs from 'fs/promises';
 import path from 'path';
+import { TwitterApi } from 'twitter-api-v2';
 
 const MIN_MCAP = 50000; // 70K USD
 const TOKEN_RETENTION_DAYS = 7; // Lưu token trong 7 ngày
+const CHECK_INTERVAL_MINUTES = 10; // Kiểm tra lại mỗi 30 phút
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const MORALIS_API_KEY = process.env.MORALIS_API_KEY;
+const TWITTER_BEARER_TOKEN = process.env.TWITTER_BEARER_TOKEN;
 
 const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
 const POSTED_TOKENS_FILE = path.resolve('posted_tokens.json');
+
+const twitterClient = new TwitterApi(TWITTER_BEARER_TOKEN);
 
 async function loadPostedTokens() {
   try {
@@ -18,14 +23,14 @@ async function loadPostedTokens() {
     if (!data.trim()) {
       console.log('File posted_tokens.json is empty, initializing as empty array');
       await fs.writeFile(POSTED_TOKENS_FILE, JSON.stringify([]));
-      return new Set();
+      return new Map();
     }
 
     const tokensWithTimestamps = JSON.parse(data);
     if (!Array.isArray(tokensWithTimestamps)) {
       console.log('File posted_tokens.json contains invalid data, resetting to empty array');
       await fs.writeFile(POSTED_TOKENS_FILE, JSON.stringify([]));
-      return new Set();
+      return new Map();
     }
 
     console.log('Loaded tokens from file:', tokensWithTimestamps);
@@ -35,7 +40,7 @@ async function loadPostedTokens() {
 
     const validTokens = tokensWithTimestamps.filter(token => {
       const tokenDate = new Date(token.timestamp);
-      return tokenDate >= cutoffDate;
+      return tokenDate >= cutoffDate; // Không lọc theo tweeted để giữ tất cả token
     });
 
     if (validTokens.length !== tokensWithTimestamps.length) {
@@ -43,24 +48,25 @@ async function loadPostedTokens() {
       console.log(`Removed ${tokensWithTimestamps.length - validTokens.length} old tokens`);
     }
 
-    console.log('Valid tokens after filtering:', validTokens);
-    return new Set(validTokens.map(token => token.address));
+    const tokenMap = new Map(validTokens.map(token => [token.address, { timestamp: token.timestamp, initialMcap: token.initialMcap || 0, tweeted: token.tweeted || false, telegramMessageId: token.telegramMessageId || null }]));
+    console.log('Valid tokens after filtering:', Array.from(tokenMap.entries()));
+    return tokenMap;
   } catch (error) {
     if (error.code === 'ENOENT') {
       await fs.writeFile(POSTED_TOKENS_FILE, JSON.stringify([]));
       console.log('Created new posted_tokens.json file');
-      return new Set();
+      return new Map();
     } else if (error instanceof SyntaxError) {
       console.error('File posted_tokens.json contains invalid JSON, resetting to empty array:', error);
       await fs.writeFile(POSTED_TOKENS_FILE, JSON.stringify([]));
-      return new Set();
+      return new Map();
     }
     console.error('Error loading posted tokens:', error);
-    return new Set();
+    return new Map();
   }
 }
 
-async function savePostedTokens(postedTokensSet) {
+async function savePostedTokens(postedTokensMap) {
   try {
     let tokensWithTimestamps = [];
     try {
@@ -88,16 +94,16 @@ async function savePostedTokens(postedTokensSet) {
     }
 
     const now = new Date().toISOString();
-    const tokenMap = new Map(tokensWithTimestamps.map(token => [token.address, token]));
+    const tokenMap = new Map(tokensWithTimestamps.map(token => [token.address, { timestamp: token.timestamp, initialMcap: token.initialMcap || 0, tweeted: token.tweeted || false, telegramMessageId: token.telegramMessageId || null }]));
 
-    for (const address of postedTokensSet) {
+    for (const [address, data] of postedTokensMap) {
       if (!tokenMap.has(address)) {
-        tokenMap.set(address, { address, timestamp: now });
-        console.log(`Added new token to save: ${address} at ${now}`);
+        tokenMap.set(address, { address, timestamp: now, initialMcap: data.initialMcap, tweeted: data.tweeted || false, telegramMessageId: data.telegramMessageId || null });
+        console.log(`Added new token to save: ${address} at ${now} with initial MCAP ${data.initialMcap}`);
       }
     }
 
-    const updatedTokens = Array.from(tokenMap.values());
+    const updatedTokens = Array.from(tokenMap.entries()).map(([address, { timestamp, initialMcap, tweeted, telegramMessageId }]) => ({ address, timestamp, initialMcap, tweeted, telegramMessageId }));
     await fs.writeFile(POSTED_TOKENS_FILE, JSON.stringify(updatedTokens, null, 2));
     console.log(`Saved ${updatedTokens.length} tokens to posted_tokens.json`);
   } catch (error) {
@@ -116,8 +122,8 @@ async function fetchTokens() {
       }
     };
 
-    const exchange = 'pumpfun'; // Thay bằng tên sàn giao dịch bạn muốn (ví dụ: pumpfun)
-    const response = await fetch(`https://solana-gateway.moralis.io/token/mainnet/exchange/${exchange}/graduated?limit=20`, options);
+    const exchange = 'pumpfun';
+    const response = await fetch(`https://solana-gateway.moralis.io/token/mainnet/exchange/${exchange}/graduated`, options);
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -129,7 +135,7 @@ async function fetchTokens() {
       return [];
     }
 
-    const tokens = data.result.map(token => token.address); // Giả sử dữ liệu trả về có trường "address"
+    const tokens = data.result.map(token => token.address);
     console.log('Moralis API response - Graduated tokens:', data.result);
     console.log(`Fetched ${tokens.length} unique tokens from Moralis`);
     return tokens;
@@ -188,20 +194,108 @@ async function sendToTelegram(token) {
 - Social Links: ${socialLinksText}`;
 
   try {
+    let sentMessage;
     if (token.imageUrl) {
-      await bot.telegram.sendPhoto(TELEGRAM_CHAT_ID, token.imageUrl, {
+      sentMessage = await bot.telegram.sendPhoto(TELEGRAM_CHAT_ID, token.imageUrl, {
         caption: message,
         parse_mode: 'HTML',
         reply_markup: replyMarkup
       });
     } else {
-      await bot.telegram.sendMessage(TELEGRAM_CHAT_ID, message, {
+      sentMessage = await bot.telegram.sendMessage(TELEGRAM_CHAT_ID, message, {
         parse_mode: 'HTML',
         reply_markup: replyMarkup
       });
     }
+    return { initialMcap: token.mcap, telegramMessageId: sentMessage.message_id }; // Trả về MCAP và message_id
   } catch (error) {
     console.error('Error sending message to Telegram:', error);
+    return null;
+  }
+}
+
+async function sendToTwitter(tokenAddress, initialMcap, telegramMessageId) {
+  try {
+    const currentTokenData = await fetchDexData(tokenAddress);
+    if (!currentTokenData) {
+      console.error('Failed to fetch current token data for Twitter post');
+      return;
+    }
+
+    const currentMcap = currentTokenData.mcap;
+    const multiplier = currentMcap > 0 && initialMcap > 0 ? Math.round(currentMcap / initialMcap) : 1;
+
+    if (multiplier < 2) {
+      console.log(`Skipping Twitter post for ${tokenAddress}: MCAP multiplier (${multiplier}x) is less than 2x`);
+      return;
+    }
+
+    // Định dạng MCAP thành dạng ngắn gọn (50k, 150k)
+    const formatMcap = (mcap) => {
+      if (mcap >= 1_000_000) return `${Math.round(mcap / 1_000_000)}M`;
+      if (mcap >= 1_000) return `${Math.round(mcap / 1_000)}k`;
+      return mcap.toLocaleString();
+    };
+
+    // Tạo link đến bài đăng Telegram
+    const telegramPostUrl = `https://t.me/radiosignal_sniper/${telegramMessageId}`;
+    const caption = `🏆 x${multiplier} from call 🐋🐋🐋\nMCAP: ${formatMcap(initialMcap)} 🌙🌙🌙 ${formatMcap(currentMcap)}`;
+    const tweetContent = `${caption}\n${telegramPostUrl}`;
+
+    await twitterClient.v2.tweet(tweetContent);
+
+    console.log(`Successfully posted to Twitter for ${tokenAddress} with caption: ${tweetContent}`);
+
+    // Đánh dấu token đã tweet
+    const postedTokens = await loadPostedTokens();
+    if (postedTokens.has(tokenAddress)) {
+      postedTokens.set(tokenAddress, { ...postedTokens.get(tokenAddress), tweeted: true });
+      await savePostedTokens(postedTokens);
+    }
+  } catch (error) {
+    console.error('Error sending tweet to Twitter:', error);
+  }
+}
+
+async function checkAndPostToTwitter() {
+  console.log('Checking and posting to Twitter for all tokens...');
+  const postedTokens = await loadPostedTokens();
+
+  // Tạo danh sách token thỏa mãn điều kiện
+  const eligibleTokens = [];
+  for (const [address, { initialMcap, tweeted, telegramMessageId }] of postedTokens) {
+    const currentTokenData = await fetchDexData(address);
+    if (currentTokenData) {
+      const currentMcap = currentTokenData.mcap;
+      const multiplier = currentMcap > 0 && initialMcap > 0 ? currentMcap / initialMcap : 1;
+      if (multiplier >= 2 && telegramMessageId) {
+        eligibleTokens.push({ address, currentMcap, initialMcap, tweeted, telegramMessageId });
+      }
+    }
+  }
+
+  // Lọc và sắp xếp token
+  if (eligibleTokens.length > 0) {
+    // Ưu tiên token chưa tweet và có MCAP hiện tại cao nhất
+    const untweetedTokens = eligibleTokens.filter(token => !token.tweeted);
+    const tweetedTokens = eligibleTokens.filter(token => token.tweeted);
+
+    let bestToken = null;
+    if (untweetedTokens.length > 0) {
+      // Chọn token chưa tweet có MCAP cao nhất
+      untweetedTokens.sort((a, b) => b.currentMcap - a.currentMcap);
+      bestToken = untweetedTokens[0];
+    } else if (tweetedTokens.length > 0) {
+      // Nếu không có token chưa tweet, chọn token đã tweet nhưng có MCAP cao nhất
+      tweetedTokens.sort((a, b) => b.currentMcap - a.currentMcap);
+      bestToken = tweetedTokens[0];
+    }
+
+    if (bestToken) {
+      await sendToTwitter(bestToken.address, bestToken.initialMcap, bestToken.telegramMessageId);
+    }
+  } else {
+    console.log('No tokens eligible for Twitter post (no significant MCAP change >= 2x)');
   }
 }
 
@@ -235,11 +329,13 @@ async function main() {
       continue;
     }
 
-    await sendToTelegram(tokenData);
-    postedTokens.add(address);
-    await savePostedTokens(postedTokens);
-    console.log(`Successfully posted token ${address}`);
-    break;
+    const result = await sendToTelegram(tokenData);
+    if (result) {
+      postedTokens.set(address, { ...result });
+      await savePostedTokens(postedTokens);
+      console.log(`Successfully posted token ${address} to Telegram with initial MCAP ${result.initialMcap} and message ID ${result.telegramMessageId}`);
+    }
+    break; // Chỉ đăng 1 token mỗi lần chạy
   }
 }
 
@@ -247,3 +343,6 @@ main().catch(error => {
   console.error('Error in main:', error);
   process.exit(1);
 });
+
+// Chạy checkAndPostToTwitter định kỳ
+setInterval(checkAndPostToTwitter, CHECK_INTERVAL_MINUTES * 60 * 1000);

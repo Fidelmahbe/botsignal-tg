@@ -1,8 +1,9 @@
-name: Fetch Tokens from Moralis
+name: Fetch Tokens from Moralis with Twitter Automation
 
 on:
   schedule:
-    - cron: '*/5 * * * *' # Chạy mỗi 5 phút
+    - cron: '*/5 * * * *'  # Chạy mỗi 5 phút để kiểm tra token mới
+    - cron: '*/10 * * * *' # Chạy mỗi 30 phút để kiểm tra và đăng lên Twitter
   workflow_dispatch:
 
 jobs:
@@ -33,7 +34,8 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          MORALIS_API_KEY: ${{ secrets.MORALIS_API_KEY }} # Thêm Moralis API Key
+          MORALIS_API_KEY: ${{ secrets.MORALIS_API_KEY }}
+          TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
         run: npm start
 
       - name: Commit and push changes
