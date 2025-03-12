@@ -2,10 +2,11 @@ import { Telegraf } from 'telegraf';
 import fs from 'fs/promises';
 import path from 'path';
 import { TwitterApi } from 'twitter-api-v2';
+import { argv } from 'process'; // Thêm module process để xử lý tham số
 
-const MIN_MCAP = 50000; // 70K USD
+const MIN_MCAP = 45000; // 70K USD
 const TOKEN_RETENTION_DAYS = 7; // Lưu token trong 7 ngày
-const CHECK_INTERVAL_MINUTES = 10; // Kiểm tra lại mỗi 30 phút
+const CHECK_INTERVAL_MINUTES = 10; // Cập nhật thành 10 phút cho cron job phụ
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -16,6 +17,9 @@ const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
 const POSTED_TOKENS_FILE = path.resolve('posted_tokens.json');
 
 const twitterClient = new TwitterApi(TWITTER_BEARER_TOKEN);
+
+// Kiểm tra tham số dòng lệnh
+const shouldCheckTwitter = argv.includes('--check-twitter');
 
 async function loadPostedTokens() {
   try {
@@ -36,11 +40,11 @@ async function loadPostedTokens() {
     console.log('Loaded tokens from file:', tokensWithTimestamps);
 
     const now = new Date();
-    const cutoffDate = new Date(now.getTime() - TOKEN_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+    const cutoffDate = new Date(now.getTime() - TOKEN_RETENTION_DAYS * 60 * 60 * 1000);
 
     const validTokens = tokensWithTimestamps.filter(token => {
       const tokenDate = new Date(token.timestamp);
-      return tokenDate >= cutoffDate; // Không lọc theo tweeted để giữ tất cả token
+      return tokenDate >= cutoffDate;
     });
 
     if (validTokens.length !== tokensWithTimestamps.length) {
@@ -300,6 +304,11 @@ async function checkAndPostToTwitter() {
 }
 
 async function main() {
+  if (shouldCheckTwitter) {
+    await checkAndPostToTwitter();
+    return;
+  }
+
   console.log('Execution started at:', new Date().toISOString());
   const postedTokens = await loadPostedTokens();
 
@@ -344,5 +353,7 @@ main().catch(error => {
   process.exit(1);
 });
 
-// Chạy checkAndPostToTwitter định kỳ
-setInterval(checkAndPostToTwitter, CHECK_INTERVAL_MINUTES * 60 * 1000);
+// Chạy checkAndPostToTwitter định kỳ (không cần nếu dùng cron job riêng)
+if (!shouldCheckTwitter) {
+  setInterval(checkAndPostToTwitter, CHECK_INTERVAL_MINUTES * 60 * 1000);
+}
