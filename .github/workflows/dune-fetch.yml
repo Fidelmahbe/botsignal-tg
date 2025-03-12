@@ -2,7 +2,7 @@ name: Fetch Tokens from Moralis
 
 on:
   schedule:
-    - cron: '*/5 * * * *' # Chạy mỗi 5 phút
+    - cron: '*/5 * * * *' # Chạy kiểm tra token và gửi Telegram mỗi 5 phút
   workflow_dispatch:
 
 jobs:
@@ -33,8 +33,8 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          MORALIS_API_KEY: ${{ secrets.MORALIS_API_KEY }} # Thêm Moralis API Key
-        run: npm start
+          MORALIS_API_KEY: ${{ secrets.MORALIS_API_KEY }}
+        run: node index.js
 
       - name: Commit and push changes
         run: |

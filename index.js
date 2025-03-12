@@ -1,25 +1,17 @@
 import { Telegraf } from 'telegraf';
 import fs from 'fs/promises';
 import path from 'path';
-import { TwitterApi } from 'twitter-api-v2';
-import { argv } from 'process'; // Thêm module process để xử lý tham số
 
-const MIN_MCAP = 45000; // 70K USD
+const MIN_MCAP = 50000; // 50K USD (theo yêu cầu của bạn)
 const TOKEN_RETENTION_DAYS = 7; // Lưu token trong 7 ngày
-const CHECK_INTERVAL_MINUTES = 10; // Cập nhật thành 10 phút cho cron job phụ
+const CHECK_INTERVAL_MINUTES = 10; // Kiểm tra MCAP mỗi 10 phút
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const MORALIS_API_KEY = process.env.MORALIS_API_KEY;
-const TWITTER_BEARER_TOKEN = process.env.TWITTER_BEARER_TOKEN;
 
 const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
 const POSTED_TOKENS_FILE = path.resolve('posted_tokens.json');
-
-const twitterClient = new TwitterApi(TWITTER_BEARER_TOKEN);
-
-// Kiểm tra tham số dòng lệnh
-const shouldCheckTwitter = argv.includes('--check-twitter');
 
 async function loadPostedTokens() {
   try {
@@ -27,7 +19,7 @@ async function loadPostedTokens() {
     if (!data.trim()) {
       console.log('File posted_tokens.json is empty, initializing as empty array');
       await fs.writeFile(POSTED_TOKENS_FILE, JSON.stringify([]));
-      return new Map();
+      return new Map(); // Sử dụng Map để lưu initialMcap và telegramMessageId
     }
 
     const tokensWithTimestamps = JSON.parse(data);
@@ -40,7 +32,7 @@ async function loadPostedTokens() {
     console.log('Loaded tokens from file:', tokensWithTimestamps);
 
     const now = new Date();
-    const cutoffDate = new Date(now.getTime() - TOKEN_RETENTION_DAYS * 60 * 60 * 1000);
+    const cutoffDate = new Date(now.getTime() - TOKEN_RETENTION_DAYS * 24 * 60 * 60 * 1000);
 
     const validTokens = tokensWithTimestamps.filter(token => {
       const tokenDate = new Date(token.timestamp);
@@ -52,9 +44,8 @@ async function loadPostedTokens() {
       console.log(`Removed ${tokensWithTimestamps.length - validTokens.length} old tokens`);
     }
 
-    const tokenMap = new Map(validTokens.map(token => [token.address, { timestamp: token.timestamp, initialMcap: token.initialMcap || 0, tweeted: token.tweeted || false, telegramMessageId: token.telegramMessageId || null }]));
-    console.log('Valid tokens after filtering:', Array.from(tokenMap.entries()));
-    return tokenMap;
+    console.log('Valid tokens after filtering:', validTokens);
+    return new Map(validTokens.map(token => [token.address, { timestamp: token.timestamp, initialMcap: token.initialMcap || 0, telegramMessageId: token.telegramMessageId || null }]));
   } catch (error) {
     if (error.code === 'ENOENT') {
       await fs.writeFile(POSTED_TOKENS_FILE, JSON.stringify([]));
@@ -98,16 +89,16 @@ async function savePostedTokens(postedTokensMap) {
     }
 
     const now = new Date().toISOString();
-    const tokenMap = new Map(tokensWithTimestamps.map(token => [token.address, { timestamp: token.timestamp, initialMcap: token.initialMcap || 0, tweeted: token.tweeted || false, telegramMessageId: token.telegramMessageId || null }]));
+    const tokenMap = new Map(tokensWithTimestamps.map(token => [token.address, { timestamp: token.timestamp, initialMcap: token.initialMcap || 0, telegramMessageId: token.telegramMessageId || null }]));
 
     for (const [address, data] of postedTokensMap) {
       if (!tokenMap.has(address)) {
-        tokenMap.set(address, { address, timestamp: now, initialMcap: data.initialMcap, tweeted: data.tweeted || false, telegramMessageId: data.telegramMessageId || null });
+        tokenMap.set(address, { address, timestamp: now, initialMcap: data.initialMcap, telegramMessageId: data.telegramMessageId || null });
         console.log(`Added new token to save: ${address} at ${now} with initial MCAP ${data.initialMcap}`);
       }
     }
 
-    const updatedTokens = Array.from(tokenMap.entries()).map(([address, { timestamp, initialMcap, tweeted, telegramMessageId }]) => ({ address, timestamp, initialMcap, tweeted, telegramMessageId }));
+    const updatedTokens = Array.from(tokenMap.entries()).map(([address, { timestamp, initialMcap, telegramMessageId }]) => ({ address, timestamp, initialMcap, telegramMessageId }));
     await fs.writeFile(POSTED_TOKENS_FILE, JSON.stringify(updatedTokens, null, 2));
     console.log(`Saved ${updatedTokens.length} tokens to posted_tokens.json`);
   } catch (error) {
@@ -127,7 +118,7 @@ async function fetchTokens() {
     };
 
     const exchange = 'pumpfun';
-    const response = await fetch(`https://solana-gateway.moralis.io/token/mainnet/exchange/${exchange}/graduated?limit=10`, options);
+    const response = await fetch(`https://solana-gateway.moralis.io/token/mainnet/exchange/${exchange}/graduated?limit=20`, options);
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -181,7 +172,7 @@ async function fetchDexData(address) {
   }
 }
 
-async function sendToTelegram(token) {
+async function sendToTelegram(token, multiplier = null) {
   const socialLinksText = token.socialLinks.length
     ? token.socialLinks.map(link => `<a href="${link}">🔗 ${new URL(link).hostname}</a>`).join('\n')
     : 'None';
@@ -189,126 +180,57 @@ async function sendToTelegram(token) {
   const tradeLink = `https://mevx.io/solana/${token.address}?ref=aV2RYY3VcBKW`;
   const replyMarkup = { inline_keyboard: [[{ text: 'Trade', url: tradeLink }]] };
 
-  const message = `🟢🟢 New Gem Tracking 🟢🟢
+  let message = `🟢🟢 New Gem Tracking 🟢🟢\n\n- Address: <code>${token.address}</code>\n- Symbol: ${token.symbol}\n- Name: ${token.name}\n- Mcap: ${Number(token.mcap).toLocaleString()} USD\n- Social Links: ${socialLinksText}`;
 
-- Address: <code>${token.address}</code>
-- Symbol: ${token.symbol}
-- Name: ${token.name}
-- Mcap: ${Number(token.mcap).toLocaleString()} USD
-- Social Links: ${socialLinksText}`;
+  // Thêm thông tin MCAP tăng nếu có multiplier
+  if (multiplier && multiplier >= 2) {
+    message += `\n\n🚀 MCAP tăng ${multiplier}x từ call ban đầu!`;
+  }
 
   try {
-    let sentMessage;
     if (token.imageUrl) {
-      sentMessage = await bot.telegram.sendPhoto(TELEGRAM_CHAT_ID, token.imageUrl, {
+      await bot.telegram.sendPhoto(TELEGRAM_CHAT_ID, token.imageUrl, {
         caption: message,
         parse_mode: 'HTML',
         reply_markup: replyMarkup
       });
     } else {
-      sentMessage = await bot.telegram.sendMessage(TELEGRAM_CHAT_ID, message, {
+      await bot.telegram.sendMessage(TELEGRAM_CHAT_ID, message, {
         parse_mode: 'HTML',
         reply_markup: replyMarkup
       });
     }
-    return { initialMcap: token.mcap, telegramMessageId: sentMessage.message_id }; // Trả về MCAP và message_id
+    return { initialMcap: token.mcap }; // Trả về initialMcap khi gửi lần đầu
   } catch (error) {
     console.error('Error sending message to Telegram:', error);
-    return null;
   }
 }
 
-async function sendToTwitter(tokenAddress, initialMcap, telegramMessageId) {
-  try {
-    const currentTokenData = await fetchDexData(tokenAddress);
+async function checkAndPostMCAP() {
+  console.log('Checking MCAP for all tokens...');
+  const postedTokens = await loadPostedTokens();
+
+  // Kiểm tra từng token đã được đăng
+  for (const [address, { initialMcap, telegramMessageId }] of postedTokens) {
+    const currentTokenData = await fetchDexData(address);
     if (!currentTokenData) {
-      console.error('Failed to fetch current token data for Twitter post');
-      return;
+      console.log(`No Dexscreener data found for token ${address}`);
+      continue;
     }
 
     const currentMcap = currentTokenData.mcap;
     const multiplier = currentMcap > 0 && initialMcap > 0 ? Math.round(currentMcap / initialMcap) : 1;
 
-    if (multiplier < 2) {
-      console.log(`Skipping Twitter post for ${tokenAddress}: MCAP multiplier (${multiplier}x) is less than 2x`);
-      return;
+    if (multiplier >= 2) {
+      console.log(`MCAP of ${address} increased ${multiplier}x, posting to Telegram`);
+      await sendToTelegram(currentTokenData, multiplier);
+    } else {
+      console.log(`MCAP of ${address} multiplier (${multiplier}x) is less than 2x, skipping`);
     }
-
-    // Định dạng MCAP thành dạng ngắn gọn (50k, 150k)
-    const formatMcap = (mcap) => {
-      if (mcap >= 1_000_000) return `${Math.round(mcap / 1_000_000)}M`;
-      if (mcap >= 1_000) return `${Math.round(mcap / 1_000)}k`;
-      return mcap.toLocaleString();
-    };
-
-    // Tạo link đến bài đăng Telegram
-    const telegramPostUrl = `https://t.me/radiosignal_sniper/${telegramMessageId}`;
-    const caption = `🏆 x${multiplier} from call 🐋🐋🐋\nMCAP: ${formatMcap(initialMcap)} 🌙🌙🌙 ${formatMcap(currentMcap)}`;
-    const tweetContent = `${caption}\n${telegramPostUrl}`;
-
-    await twitterClient.v2.tweet(tweetContent);
-
-    console.log(`Successfully posted to Twitter for ${tokenAddress} with caption: ${tweetContent}`);
-
-    // Đánh dấu token đã tweet
-    const postedTokens = await loadPostedTokens();
-    if (postedTokens.has(tokenAddress)) {
-      postedTokens.set(tokenAddress, { ...postedTokens.get(tokenAddress), tweeted: true });
-      await savePostedTokens(postedTokens);
-    }
-  } catch (error) {
-    console.error('Error sending tweet to Twitter:', error);
-  }
-}
-
-async function checkAndPostToTwitter() {
-  console.log('Checking and posting to Twitter for all tokens...');
-  const postedTokens = await loadPostedTokens();
-
-  // Tạo danh sách token thỏa mãn điều kiện
-  const eligibleTokens = [];
-  for (const [address, { initialMcap, tweeted, telegramMessageId }] of postedTokens) {
-    const currentTokenData = await fetchDexData(address);
-    if (currentTokenData) {
-      const currentMcap = currentTokenData.mcap;
-      const multiplier = currentMcap > 0 && initialMcap > 0 ? currentMcap / initialMcap : 1;
-      if (multiplier >= 2 && telegramMessageId) {
-        eligibleTokens.push({ address, currentMcap, initialMcap, tweeted, telegramMessageId });
-      }
-    }
-  }
-
-  // Lọc và sắp xếp token
-  if (eligibleTokens.length > 0) {
-    // Ưu tiên token chưa tweet và có MCAP hiện tại cao nhất
-    const untweetedTokens = eligibleTokens.filter(token => !token.tweeted);
-    const tweetedTokens = eligibleTokens.filter(token => token.tweeted);
-
-    let bestToken = null;
-    if (untweetedTokens.length > 0) {
-      // Chọn token chưa tweet có MCAP cao nhất
-      untweetedTokens.sort((a, b) => b.currentMcap - a.currentMcap);
-      bestToken = untweetedTokens[0];
-    } else if (tweetedTokens.length > 0) {
-      // Nếu không có token chưa tweet, chọn token đã tweet nhưng có MCAP cao nhất
-      tweetedTokens.sort((a, b) => b.currentMcap - a.currentMcap);
-      bestToken = tweetedTokens[0];
-    }
-
-    if (bestToken) {
-      await sendToTwitter(bestToken.address, bestToken.initialMcap, bestToken.telegramMessageId);
-    }
-  } else {
-    console.log('No tokens eligible for Twitter post (no significant MCAP change >= 2x)');
   }
 }
 
 async function main() {
-  if (shouldCheckTwitter) {
-    await checkAndPostToTwitter();
-    return;
-  }
-
   console.log('Execution started at:', new Date().toISOString());
   const postedTokens = await loadPostedTokens();
 
@@ -340,9 +262,9 @@ async function main() {
 
     const result = await sendToTelegram(tokenData);
     if (result) {
-      postedTokens.set(address, { ...result });
+      postedTokens.set(address, { ...result, telegramMessageId: null }); // Lưu initialMcap, telegramMessageId sẽ được cập nhật khi gửi lần đầu
       await savePostedTokens(postedTokens);
-      console.log(`Successfully posted token ${address} to Telegram with initial MCAP ${result.initialMcap} and message ID ${result.telegramMessageId}`);
+      console.log(`Successfully posted token ${address} with initial MCAP ${result.initialMcap}`);
     }
     break; // Chỉ đăng 1 token mỗi lần chạy
   }
@@ -353,7 +275,5 @@ main().catch(error => {
   process.exit(1);
 });
 
-// Chạy checkAndPostToTwitter định kỳ (không cần nếu dùng cron job riêng)
-if (!shouldCheckTwitter) {
-  setInterval(checkAndPostToTwitter, CHECK_INTERVAL_MINUTES * 60 * 1000);
-}
+// Chạy checkAndPostMCAP định kỳ
+setInterval(checkAndPostMCAP, CHECK_INTERVAL_MINUTES * 60 * 1000);
