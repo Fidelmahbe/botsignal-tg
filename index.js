@@ -2,13 +2,12 @@ import { Telegraf } from 'telegraf';
 import fs from 'fs/promises';
 import path from 'path';
 
-const DUNE_API_URL = 'https://api.dune.com/api/v1/query/4833321/results?limit=10&refresh=true';
-const MIN_MCAP = 70000; // 70K USD
+const MIN_MCAP = 50000; // 70K USD
 const TOKEN_RETENTION_DAYS = 7; // Lưu token trong 7 ngày
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-const DUNE_API_KEY = process.env.DUNE_API_KEY;
+const MORALIS_API_KEY = process.env.MORALIS_API_KEY;
 
 const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
 const POSTED_TOKENS_FILE = path.resolve('posted_tokens.json');
@@ -108,27 +107,34 @@ async function savePostedTokens(postedTokensSet) {
 
 async function fetchTokens() {
   try {
-    console.log('Fetching tokens from Dune API...');
-    const response = await fetch(DUNE_API_URL, {
+    console.log('Fetching graduated tokens from Moralis API for Pump.fun...');
+    const options = {
       method: 'GET',
-      headers: { 'X-Dune-API-Key': DUNE_API_KEY }
-    });
+      headers: {
+        accept: 'application/json',
+        'X-API-Key': process.env.MORALIS_API_KEY
+      }
+    };
+
+    const exchange = 'pumpfun'; // Thay bằng tên sàn giao dịch bạn muốn (ví dụ: pumpfun)
+    const response = await fetch(`https://solana-gateway.moralis.io/token/mainnet/exchange/${exchange}/graduated`, options);
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
     const data = await response.json();
-    if (!data?.result?.rows) {
-      console.log('No data returned from Dune API');
+    if (!data?.result) {
+      console.log('No data returned from Moralis API');
       return [];
     }
 
-    console.log('Dune API response:', JSON.stringify(data.result.rows, null, 2));
-    console.log(`Fetched ${data.result.rows.length} tokens from Dune`);
-    return data.result.rows.map(row => row.token_address);
+    const tokens = data.result.map(token => token.address); // Giả sử dữ liệu trả về có trường "address"
+    console.log('Moralis API response - Graduated tokens:', data.result);
+    console.log(`Fetched ${tokens.length} unique tokens from Moralis`);
+    return tokens;
   } catch (error) {
-    console.error('Error fetching data from Dune:', error);
+    console.error('Error fetching data from Moralis:', error);
     return [];
   }
 }
@@ -205,7 +211,7 @@ async function main() {
 
   const tokens = await fetchTokens();
   if (!tokens.length) {
-    console.log('No new tokens found from Dune');
+    console.log('No new tokens found from Moralis');
     return;
   }
 

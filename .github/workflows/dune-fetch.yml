@@ -1,44 +1,41 @@
-name: Fetch Tokens from Dune
+name: Fetch Tokens from Moralis
 
 on:
   schedule:
-    - cron: '*/4 * * * *' # Chạy mỗi 10 phút
-  workflow_dispatch: # Cho phép chạy thủ công
+    - cron: '*/5 * * * *' # Chạy mỗi 5 phút
+  workflow_dispatch:
 
 jobs:
   fetch-tokens:
     runs-on: ubuntu-latest
 
     steps:
-      # Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.PAT_TOKEN }} # Sử dụng PAT để checkout
+          token: ${{ secrets.PAT_TOKEN }}
 
-      # Cài đặt Node.js
+      - name: Log cron start
+        run: echo "Cron job started at $(date -u)"
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
 
-      # Kiểm tra quyền file
       - name: Check file permissions
         run: ls -la
 
-      # Cài đặt dependencies
       - name: Install dependencies
         run: npm install
 
-      # Chạy script
       - name: Run script
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          DUNE_API_KEY: ${{ secrets.DUNE_API_KEY }}
+          MORALIS_API_KEY: ${{ secrets.MORALIS_API_KEY }} # Thêm Moralis API Key
         run: npm start
 
-      # Commit và push file posted_tokens.json nếu có thay đổi
       - name: Commit and push changes
         run: |
           git config --global user.name 'GitHub Action'
@@ -47,4 +44,4 @@ jobs:
           git commit -m 'Update posted tokens at $(date -u)' || echo "No changes to commit"
           git push origin main
         env:
-          PAT_TOKEN: ${{ secrets.PAT_TOKEN }} # Sử dụng PAT để push
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
