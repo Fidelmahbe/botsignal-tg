@@ -117,7 +117,7 @@ async function fetchTokens() {
     };
 
     const exchange = 'pumpfun'; // Thay bằng tên sàn giao dịch bạn muốn (ví dụ: pumpfun)
-    const response = await fetch(`https://solana-gateway.moralis.io/token/mainnet/exchange/${exchange}/graduated`, options);
+    const response = await fetch(`https://solana-gateway.moralis.io/token/mainnet/exchange/${exchange}/graduated?limit=20`, options);
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
