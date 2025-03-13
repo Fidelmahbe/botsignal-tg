@@ -42,11 +42,7 @@ jobs:
           git config --global user.name 'GitHub Action'
           git config --global user.email 'action@github.com'
           git add posted_tokens.json
-          if git diff-index --quiet HEAD; then
-            echo "No changes to commit"
-          else
-            git commit -m 'Update posted tokens at $(date -u)'
-            git push origin main
-          fi
+          git commit -m 'Update posted tokens at $(date -u)' || true
+          git push origin main
         env:
           PAT_TOKEN: ${{ secrets.PAT_TOKEN }}

@@ -134,8 +134,14 @@ async function fetchTokens() {
       return [];
     }
 
+    // Lọc token hợp lệ (phải có address và created_at)
+    const validTokens = data.result.filter(token => token.address && token.created_at);
+    if (validTokens.length !== data.result.length) {
+      console.log(`Filtered out ${data.result.length - validTokens.length} invalid tokens (missing address or created_at)`);
+    }
+
     // Sắp xếp token theo thời gian created_at (mới nhất trước)
-    const sortedTokens = data.result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    const sortedTokens = validTokens.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     console.log('Moralis API response - Graduated tokens (sorted by created_at):', sortedTokens);
     const tokens = sortedTokens.map(token => token.address);
     console.log(`Fetched ${tokens.length} unique tokens from Moralis (newest first)`);
@@ -148,6 +154,9 @@ async function fetchTokens() {
 
 async function fetchDexData(address) {
   try {
+    if (!address) {
+      throw new Error('Token address is undefined');
+    }
     const response = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`);
     const data = await response.json();
 
@@ -173,7 +182,7 @@ async function fetchDexData(address) {
       socialLinks: socialLinks,
     };
   } catch (error) {
-    console.error(`Error fetching Dexscreener data for ${address}:`, error);
+    console.error(`Error fetching Dexscreener data for ${address || 'undefined'}:`, error);
     return null;
   }
 }
