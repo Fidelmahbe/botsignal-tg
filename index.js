@@ -64,9 +64,12 @@ async function loadPostedTokens() {
 async function savePostedTokens(postedTokensMap) {
   try {
     console.log('Starting to save posted tokens...');
+    console.log('Tokens to save:', Array.from(postedTokensMap.entries()));
+
     let tokensWithTimestamps = [];
     try {
       const data = await fs.readFile(POSTED_TOKENS_FILE, 'utf-8');
+      console.log('Current file content before saving:', data || 'Empty file');
       if (!data.trim()) {
         console.log('File posted_tokens.json is empty, initializing as empty array');
         tokensWithTimestamps = [];
@@ -104,6 +107,10 @@ async function savePostedTokens(postedTokensMap) {
     console.log('Writing to posted_tokens.json:', updatedTokens);
     await fs.writeFile(POSTED_TOKENS_FILE, JSON.stringify(updatedTokens, null, 2));
     console.log(`Successfully saved ${updatedTokens.length} tokens to posted_tokens.json`);
+
+    // Kiểm tra file sau khi ghi
+    const fileContent = await fs.readFile(POSTED_TOKENS_FILE, 'utf-8');
+    console.log('File content after writing:', fileContent);
   } catch (error) {
     console.error('Failed to save posted tokens:', error);
     throw error;
@@ -129,13 +136,20 @@ async function fetchTokens() {
     }
 
     const data = await response.json();
+    console.log('Raw Moralis API response:', JSON.stringify(data, null, 2));
     if (!data?.result) {
       console.log('No data returned from Moralis API');
       return [];
     }
 
     // Lọc token hợp lệ (phải có address và created_at)
-    const validTokens = data.result.filter(token => token.address && token.created_at);
+    const validTokens = data.result.filter(token => {
+      const isValid = token.address && token.created_at;
+      if (!isValid) {
+        console.log(`Invalid token: ${JSON.stringify(token)}`);
+      }
+      return isValid;
+    });
     if (validTokens.length !== data.result.length) {
       console.log(`Filtered out ${data.result.length - validTokens.length} invalid tokens (missing address or created_at)`);
     }
@@ -278,7 +292,9 @@ async function main() {
 
       const result = await sendToTelegram(tokenData);
       if (result) {
+        console.log(`Adding token ${address} to postedTokens with initial MCAP ${result.initialMcap} and message ID ${result.telegramMessageId}`);
         postedTokens.set(address, { ...result, telegramMessageId: result.telegramMessageId });
+        console.log('Current state of postedTokens:', Array.from(postedTokens.entries()));
         await savePostedTokens(postedTokens);
         console.log(`Successfully posted token ${address} with initial MCAP ${result.initialMcap} and message ID ${result.telegramMessageId}`);
       } else {
