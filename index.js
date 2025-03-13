@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 
 const MIN_MCAP = 50000; // 50K USD
+const MAX_MCAP = 350000; // 350K USD
 const TOKEN_RETENTION_DAYS = 7; // Lưu token trong 7 ngày
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -62,6 +63,7 @@ async function loadPostedTokens() {
 
 async function savePostedTokens(postedTokensMap) {
   try {
+    console.log('Starting to save posted tokens...');
     let tokensWithTimestamps = [];
     try {
       const data = await fs.readFile(POSTED_TOKENS_FILE, 'utf-8');
@@ -83,6 +85,7 @@ async function savePostedTokens(postedTokensMap) {
         console.error('File posted_tokens.json contains invalid JSON, resetting to empty array:', error);
         tokensWithTimestamps = [];
       } else {
+        console.error('Unexpected error reading file:', error);
         throw error;
       }
     }
@@ -98,10 +101,12 @@ async function savePostedTokens(postedTokensMap) {
     }
 
     const updatedTokens = Array.from(tokenMap.entries()).map(([address, { timestamp, initialMcap, telegramMessageId }]) => ({ address, timestamp, initialMcap, telegramMessageId }));
+    console.log('Writing to posted_tokens.json:', updatedTokens);
     await fs.writeFile(POSTED_TOKENS_FILE, JSON.stringify(updatedTokens, null, 2));
-    console.log(`Saved ${updatedTokens.length} tokens to posted_tokens.json`);
+    console.log(`Successfully saved ${updatedTokens.length} tokens to posted_tokens.json`);
   } catch (error) {
-    console.error('Error saving posted tokens:', error);
+    console.error('Failed to save posted tokens:', error);
+    throw error;
   }
 }
 
@@ -129,9 +134,11 @@ async function fetchTokens() {
       return [];
     }
 
-    const tokens = data.result.map(token => token.address);
-    console.log('Moralis API response - Graduated tokens:', data.result);
-    console.log(`Fetched ${tokens.length} unique tokens from Moralis`);
+    // Sắp xếp token theo thời gian created_at (mới nhất trước)
+    const sortedTokens = data.result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    console.log('Moralis API response - Graduated tokens (sorted by created_at):', sortedTokens);
+    const tokens = sortedTokens.map(token => token.address);
+    console.log(`Fetched ${tokens.length} unique tokens from Moralis (newest first)`);
     return tokens;
   } catch (error) {
     console.error('Error fetching data from Moralis:', error);
@@ -181,7 +188,6 @@ async function sendToTelegram(token, multiplier = null, replyToMessageId = null)
 
   let message = `🟢🟢 New Gem Tracking 🟢🟢\n\n- Address: <code>${token.address}</code>\n- Symbol: ${token.symbol}\n- Name: ${token.name}\n- Mcap: ${Number(token.mcap).toLocaleString()} USD\n- Social Links: ${socialLinksText}`;
 
-  // Thêm thông tin MCAP tăng nếu có multiplier
   if (multiplier && multiplier >= 2) {
     message += `\n\n🏆 x${multiplier} from call 🐋🐋🐋🐋🐋`;
   }
@@ -202,6 +208,7 @@ async function sendToTelegram(token, multiplier = null, replyToMessageId = null)
         reply_to_message_id: replyToMessageId || null,
       });
     }
+    console.log(`Successfully sent message to Telegram with message ID: ${sentMessage.message_id}`);
     return { initialMcap: token.mcap, telegramMessageId: sentMessage.message_id };
   } catch (error) {
     console.error('Error sending message to Telegram:', error);
@@ -254,7 +261,8 @@ async function main() {
         continue;
       }
 
-      if (tokenData.mcap < MIN_MCAP || tokenData.socialLinks.length === 0) {
+      // Kiểm tra MCAP từ MIN_MCAP đến MAX_MCAP
+      if (tokenData.mcap < MIN_MCAP || tokenData.mcap > MAX_MCAP || tokenData.socialLinks.length === 0) {
         console.log(`Token ${address} does not meet criteria (MCAP: ${tokenData.mcap}, Socials: ${tokenData.socialLinks.length})`);
         continue;
       }
