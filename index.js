@@ -4,7 +4,6 @@ import path from 'path';
 
 const MIN_MCAP = 50000; // 50K USD
 const TOKEN_RETENTION_DAYS = 7; // Lưu token trong 7 ngày
-const CHECK_INTERVAL_MINUTES = 10; // Kiểm tra MCAP mỗi 10 phút
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -210,10 +209,8 @@ async function sendToTelegram(token, multiplier = null, replyToMessageId = null)
   }
 }
 
-async function checkAndPostMCAP() {
+async function checkAndPostMCAP(postedTokens) {
   console.log('Checking MCAP for all tokens...');
-  const postedTokens = await loadPostedTokens();
-
   for (const [address, { initialMcap, telegramMessageId }] of postedTokens) {
     const currentTokenData = await fetchDexData(address);
     if (!currentTokenData) {
@@ -237,48 +234,50 @@ async function main() {
   console.log('Execution started at:', new Date().toISOString());
   const postedTokens = await loadPostedTokens();
 
+  // Bước 1: Kiểm tra và đăng token mới
   const tokens = await fetchTokens();
   if (!tokens.length) {
     console.log('No new tokens found from Moralis');
-    return;
+  } else {
+    console.log(`Found ${tokens.length} tokens to check: ${tokens.join(', ')}`);
+
+    for (const address of tokens) {
+      console.log(`Checking token: ${address}, Already posted: ${postedTokens.has(address)}`);
+      if (postedTokens.has(address)) {
+        console.log(`Token ${address} already posted, skipping`);
+        continue;
+      }
+
+      const tokenData = await fetchDexData(address);
+      if (!tokenData) {
+        console.log(`No Dexscreener data found for token ${address}`);
+        continue;
+      }
+
+      if (tokenData.mcap < MIN_MCAP || tokenData.socialLinks.length === 0) {
+        console.log(`Token ${address} does not meet criteria (MCAP: ${tokenData.mcap}, Socials: ${tokenData.socialLinks.length})`);
+        continue;
+      }
+
+      const result = await sendToTelegram(tokenData);
+      if (result) {
+        postedTokens.set(address, { ...result, telegramMessageId: result.telegramMessageId });
+        await savePostedTokens(postedTokens);
+        console.log(`Successfully posted token ${address} with initial MCAP ${result.initialMcap} and message ID ${result.telegramMessageId}`);
+      } else {
+        console.log(`Failed to post token ${address} to Telegram, not saving to posted_tokens.json`);
+      }
+      break; // Chỉ đăng 1 token mỗi lần chạy
+    }
   }
 
-  console.log(`Found ${tokens.length} tokens to check: ${tokens.join(', ')}`);
+  // Bước 2: Kiểm tra MCAP của các token đã đăng
+  await checkAndPostMCAP(postedTokens);
 
-  for (const address of tokens) {
-    console.log(`Checking token: ${address}, Already posted: ${postedTokens.has(address)}`);
-    if (postedTokens.has(address)) {
-      console.log(`Token ${address} already posted, skipping`);
-      continue;
-    }
-
-    const tokenData = await fetchDexData(address);
-    if (!tokenData) {
-      console.log(`No Dexscreener data found for token ${address}`);
-      continue;
-    }
-
-    if (tokenData.mcap < MIN_MCAP || tokenData.socialLinks.length === 0) {
-      console.log(`Token ${address} does not meet criteria (MCAP: ${tokenData.mcap}, Socials: ${tokenData.socialLinks.length})`);
-      continue;
-    }
-
-    const result = await sendToTelegram(tokenData);
-    if (result) {
-      postedTokens.set(address, { ...result, telegramMessageId: result.telegramMessageId });
-      await savePostedTokens(postedTokens);
-      console.log(`Successfully posted token ${address} with initial MCAP ${result.initialMcap} and message ID ${result.telegramMessageId}`);
-    } else {
-      console.log(`Failed to post token ${address} to Telegram, not saving to posted_tokens.json`);
-    }
-    break; // Chỉ đăng 1 token mỗi lần chạy
-  }
+  console.log('Execution completed at:', new Date().toISOString());
 }
 
 main().catch(error => {
   console.error('Error in main:', error);
   process.exit(1);
 });
-
-// Chạy checkAndPostMCAP định kỳ
-setInterval(checkAndPostMCAP, CHECK_INTERVAL_MINUTES * 60 * 1000);
