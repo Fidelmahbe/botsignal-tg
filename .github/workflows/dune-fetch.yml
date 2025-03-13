@@ -2,12 +2,13 @@ name: Fetch Tokens from Moralis
 
 on:
   schedule:
-    - cron: '*/5 * * * *' # Chạy kiểm tra token và gửi Telegram mỗi 5 phút
+    - cron: '*/5 * * * *' # Chạy mỗi 10 phút
   workflow_dispatch:
 
 jobs:
   fetch-tokens:
     runs-on: ubuntu-latest
+    concurrency: fetch-tokens # Giới hạn chỉ một workflow chạy cùng lúc
 
     steps:
       - name: Checkout repository

@@ -2,7 +2,7 @@ import { Telegraf } from 'telegraf';
 import fs from 'fs/promises';
 import path from 'path';
 
-const MIN_MCAP = 50000; // 50K USD (theo yêu cầu của bạn)
+const MIN_MCAP = 50000; // 50K USD
 const TOKEN_RETENTION_DAYS = 7; // Lưu token trong 7 ngày
 const CHECK_INTERVAL_MINUTES = 10; // Kiểm tra MCAP mỗi 10 phút
 
@@ -19,7 +19,7 @@ async function loadPostedTokens() {
     if (!data.trim()) {
       console.log('File posted_tokens.json is empty, initializing as empty array');
       await fs.writeFile(POSTED_TOKENS_FILE, JSON.stringify([]));
-      return new Map(); // Sử dụng Map để lưu initialMcap và telegramMessageId
+      return new Map();
     }
 
     const tokensWithTimestamps = JSON.parse(data);
@@ -172,7 +172,7 @@ async function fetchDexData(address) {
   }
 }
 
-async function sendToTelegram(token, multiplier = null) {
+async function sendToTelegram(token, multiplier = null, replyToMessageId = null) {
   const socialLinksText = token.socialLinks.length
     ? token.socialLinks.map(link => `<a href="${link}">🔗 ${new URL(link).hostname}</a>`).join('\n')
     : 'None';
@@ -184,25 +184,29 @@ async function sendToTelegram(token, multiplier = null) {
 
   // Thêm thông tin MCAP tăng nếu có multiplier
   if (multiplier && multiplier >= 2) {
-    message += `\n\n🚀 MCAP tăng ${multiplier}x từ call ban đầu!`;
+    message += `\n\n🏆 x${multiplier} from call 🐋🐋🐋🐋🐋`;
   }
 
   try {
+    let sentMessage;
     if (token.imageUrl) {
-      await bot.telegram.sendPhoto(TELEGRAM_CHAT_ID, token.imageUrl, {
+      sentMessage = await bot.telegram.sendPhoto(TELEGRAM_CHAT_ID, token.imageUrl, {
         caption: message,
         parse_mode: 'HTML',
-        reply_markup: replyMarkup
+        reply_markup: replyMarkup,
+        reply_to_message_id: replyToMessageId || null,
       });
     } else {
-      await bot.telegram.sendMessage(TELEGRAM_CHAT_ID, message, {
+      sentMessage = await bot.telegram.sendMessage(TELEGRAM_CHAT_ID, message, {
         parse_mode: 'HTML',
-        reply_markup: replyMarkup
+        reply_markup: replyMarkup,
+        reply_to_message_id: replyToMessageId || null,
       });
     }
-    return { initialMcap: token.mcap }; // Trả về initialMcap khi gửi lần đầu
+    return { initialMcap: token.mcap, telegramMessageId: sentMessage.message_id };
   } catch (error) {
     console.error('Error sending message to Telegram:', error);
+    return null;
   }
 }
 
@@ -210,7 +214,6 @@ async function checkAndPostMCAP() {
   console.log('Checking MCAP for all tokens...');
   const postedTokens = await loadPostedTokens();
 
-  // Kiểm tra từng token đã được đăng
   for (const [address, { initialMcap, telegramMessageId }] of postedTokens) {
     const currentTokenData = await fetchDexData(address);
     if (!currentTokenData) {
@@ -221,11 +224,11 @@ async function checkAndPostMCAP() {
     const currentMcap = currentTokenData.mcap;
     const multiplier = currentMcap > 0 && initialMcap > 0 ? Math.round(currentMcap / initialMcap) : 1;
 
-    if (multiplier >= 2) {
-      console.log(`MCAP of ${address} increased ${multiplier}x, posting to Telegram`);
-      await sendToTelegram(currentTokenData, multiplier);
+    if (multiplier >= 2 && telegramMessageId) {
+      console.log(`MCAP of ${address} increased ${multiplier}x, posting update to Telegram`);
+      await sendToTelegram(currentTokenData, multiplier, telegramMessageId);
     } else {
-      console.log(`MCAP of ${address} multiplier (${multiplier}x) is less than 2x, skipping`);
+      console.log(`MCAP of ${address} multiplier (${multiplier}x) is less than 2x or no message ID, skipping`);
     }
   }
 }
@@ -262,9 +265,11 @@ async function main() {
 
     const result = await sendToTelegram(tokenData);
     if (result) {
-      postedTokens.set(address, { ...result, telegramMessageId: null }); // Lưu initialMcap, telegramMessageId sẽ được cập nhật khi gửi lần đầu
+      postedTokens.set(address, { ...result, telegramMessageId: result.telegramMessageId });
       await savePostedTokens(postedTokens);
-      console.log(`Successfully posted token ${address} with initial MCAP ${result.initialMcap}`);
+      console.log(`Successfully posted token ${address} with initial MCAP ${result.initialMcap} and message ID ${result.telegramMessageId}`);
+    } else {
+      console.log(`Failed to post token ${address} to Telegram, not saving to posted_tokens.json`);
     }
     break; // Chỉ đăng 1 token mỗi lần chạy
   }
