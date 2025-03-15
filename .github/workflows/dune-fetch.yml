@@ -2,7 +2,7 @@ name: Fetch Tokens from Moralis
 
 on:
   schedule:
-    - cron: '*/15 * * * *' # Chạy mỗi 5 phút
+    - cron: '*/5 * * * *' # Chạy mỗi 5 phút
   workflow_dispatch:
 
 jobs:

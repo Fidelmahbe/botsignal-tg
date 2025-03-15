@@ -142,22 +142,28 @@ async function fetchTokens() {
       return [];
     }
 
-    // Lọc token hợp lệ (phải có address và created_at)
+    // Lọc token hợp lệ (phải có tokenAddress và graduatedAt)
     const validTokens = data.result.filter(token => {
-      const isValid = token.address && token.created_at;
+      const isValid = token.tokenAddress && token.graduatedAt;
       if (!isValid) {
         console.log(`Invalid token: ${JSON.stringify(token)}`);
       }
       return isValid;
     });
     if (validTokens.length !== data.result.length) {
-      console.log(`Filtered out ${data.result.length - validTokens.length} invalid tokens (missing address or created_at)`);
+      console.log(`Filtered out ${data.result.length - validTokens.length} invalid tokens (missing tokenAddress or graduatedAt)`);
     }
 
-    // Sắp xếp token theo thời gian created_at (mới nhất trước)
-    const sortedTokens = validTokens.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    console.log('Moralis API response - Graduated tokens (sorted by created_at):', sortedTokens);
-    const tokens = sortedTokens.map(token => token.address);
+    // Sắp xếp token theo thời gian graduatedAt (mới nhất trước)
+    const sortedTokens = validTokens.sort((a, b) => new Date(b.graduatedAt) - new Date(a.graduatedAt));
+    console.log('Moralis API response - Graduated tokens (sorted by graduatedAt):', sortedTokens);
+
+    // Chỉ lấy các token đã graduated trước thời điểm hiện tại
+    const now = new Date();
+    const recentTokens = sortedTokens.filter(token => new Date(token.graduatedAt) <= now);
+    console.log(`Filtered ${recentTokens.length} tokens graduated before now`);
+
+    const tokens = recentTokens.map(token => token.tokenAddress);
     console.log(`Fetched ${tokens.length} unique tokens from Moralis (newest first)`);
     return tokens;
   } catch (error) {
@@ -165,6 +171,7 @@ async function fetchTokens() {
     return [];
   }
 }
+
 
 async function fetchDexData(address) {
   try {
@@ -174,7 +181,10 @@ async function fetchDexData(address) {
     const response = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`);
     const data = await response.json();
 
-    if (!data?.pairs?.length) return null;
+    if (!data?.pairs?.length) {
+      console.log(`No DexScreener data found for token ${address}`);
+      return null;
+    }
 
     const tokenInfo = data.pairs[0];
     const mcap = parseFloat(tokenInfo.fdv) || 0;
@@ -196,10 +206,11 @@ async function fetchDexData(address) {
       socialLinks: socialLinks,
     };
   } catch (error) {
-    console.error(`Error fetching Dexscreener data for ${address || 'undefined'}:`, error);
+    console.error(`Error fetching DexScreener data for ${address || 'undefined'}:`, error.message);
     return null;
   }
 }
+
 
 async function sendToTelegram(token, multiplier = null, replyToMessageId = null) {
   const socialLinksText = token.socialLinks.length
@@ -260,6 +271,7 @@ async function checkAndPostMCAP(postedTokens) {
   }
 }
 
+
 async function main() {
   console.log('Execution started at:', new Date().toISOString());
   const postedTokens = await loadPostedTokens();
@@ -268,6 +280,22 @@ async function main() {
   const tokens = await fetchTokens();
   if (!tokens.length) {
     console.log('No new tokens found from Moralis');
+    // Gửi thông báo trạng thái nếu cần
+    const lastNotificationFile = path.resolve('last_notification.json');
+    let lastNotification;
+    try {
+      const data = await fs.readFile(lastNotificationFile, 'utf-8');
+      lastNotification = JSON.parse(data);
+    } catch (error) {
+      lastNotification = { timestamp: 0 };
+    }
+
+    const now = Date.now();
+    const oneDay = 24 * 60 * 60 * 1000;
+    if (now - lastNotification.timestamp > oneDay) {
+      await bot.telegram.sendMessage(TELEGRAM_CHAT_ID, '🔔 Bot is running but no new tokens found in the last 24 hours.');
+      await fs.writeFile(lastNotificationFile, JSON.stringify({ timestamp: now }));
+    }
   } else {
     console.log(`Found ${tokens.length} tokens to check: ${tokens.join(', ')}`);
 
@@ -309,6 +337,7 @@ async function main() {
 
   console.log('Execution completed at:', new Date().toISOString());
 }
+
 
 main().catch(error => {
   console.error('Error in main:', error);
