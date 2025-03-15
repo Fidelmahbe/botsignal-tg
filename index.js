@@ -186,21 +186,17 @@ async function fetchDexData(address) {
 }
 
 async function sendToTelegram(token, multiplier = null, replyToMessageId = null) {
-  const socialLinksText = token.socialLinks.length
-    ? token.socialLinks.map(link => `<a href="${link}">🔗 ${new URL(link).hostname}</a>`).join('\n')
-    : 'None';
-
   // Định nghĩa các liên kết giao dịch với token.address
   const mevxWebLink = `https://mevx.io/solana/${token.address}?ref=aV2RYY3VcBKW`;
   const mevxTeleLink = `https://t.me/Mevx?start=aV2RYY3VcBKW&address=${token.address}`;
-  const bullxLink = `https://neo.bullx.io/terminal?chainId=1399811149&address=${token.address}&r=access_24IR0BUEMF9`;
+  const bullxLink = `https://neo.bullx.io/terminal?chainId=1399811149&address=${token.address}&r=OX4BOESUUPO`;
   const trojanLink = `https://t.me/odysseus_trojanbot?start=r-strongggt-${token.address}pump`;
   const metaSolanaLink = `https://t.me/MetaSolanaBot?start=22WPWXZE&address=${token.address}`;
   const solTradingBotLink = `https://t.me/SolTradingBot?start=WAKa0XTVQ&address=${token.address}`;
   const chartLink = `https://dexscreener.com/solana/${token.address}`;
 
   // Cấu hình inline keyboard với các nút
-  const replyMarkup = {
+const replyMarkup = {
     inline_keyboard: [
       [
         { text: '📊 Chart', url: chartLink },
@@ -220,15 +216,27 @@ async function sendToTelegram(token, multiplier = null, replyToMessageId = null)
     ],
   };
 
-  let message = `🟢🟢 New Gem Tracking 🟢🟢\n\n- Address: <code>${token.address}</code>\n- Symbol: ${token.symbol}\n- Name: ${token.name}\n- Mcap: ${Number(token.mcap).toLocaleString()} USD\n- Social Links: ${socialLinksText}`;
-
+  let message;
   if (multiplier && multiplier >= 2) {
-    message += `\n\n🏆🏆 x${multiplier} from call 🧿🧿🧿🧿🧿🧿`;
+    // Định dạng ngắn gọn khi so sánh MCAP
+    const oldMcap = token.initialMcap || 0;
+    const newMcap = token.mcap;
+    const formatNumber = (num) => {
+      if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
+      return `${(num / 1000).toFixed(0)}K`;
+    };
+    message = `$${token.symbol}: ${formatNumber(oldMcap)} --> ${formatNumber(newMcap)}\n🏆🏆 x${multiplier} from call 🧿🧿🧿🧿🧿🧿`;
+  } else {
+    // Định dạng đầy đủ cho thông báo ban đầu
+    const socialLinksText = token.socialLinks.length
+      ? token.socialLinks.map(link => `<a href="${link}">🔗 ${new URL(link).hostname}</a>`).join('\n')
+      : 'None';
+    message = `🟢🟢 New Gem Tracking 🟢🟢\n\n- Address: <code>${token.address}</code>\n- Symbol: ${token.symbol}\n- Name: ${token.name}\n- Mcap: ${Number(token.mcap).toLocaleString()} USD\n- Social Links: ${socialLinksText}`;
   }
 
   try {
     let sentMessage;
-    if (token.imageUrl) {
+    if (token.imageUrl && !multiplier) {
       sentMessage = await bot.telegram.sendPhoto(TELEGRAM_CHAT_ID, token.imageUrl, {
         caption: message,
         parse_mode: 'HTML',
@@ -265,6 +273,7 @@ async function checkAndPostMCAP(postedTokens) {
     if (multiplier >= 2 && telegramMessageId) {
       if (multiplier > maxMultiplier) {
         console.log(`MCAP of ${address} increased ${multiplier}x (new max), posting update to Telegram`);
+        currentTokenData.initialMcap = initialMcap;
         const result = await sendToTelegram(currentTokenData, multiplier, telegramMessageId);
         if (result) {
           postedTokens.set(address, {
