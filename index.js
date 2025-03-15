@@ -19,8 +19,8 @@ try {
 
 const db = getFirestore(firebaseApp);
 
-const MIN_MCAP = 72000; // 50K USD
-const MAX_MCAP = 260000; // 350K USD
+const MIN_MCAP = 50000; // 50K USD
+const MAX_MCAP = 350000; // 350K USD
 const TOKEN_RETENTION_DAYS = 7; // Lưu token trong 7 ngày
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -190,8 +190,35 @@ async function sendToTelegram(token, multiplier = null, replyToMessageId = null)
     ? token.socialLinks.map(link => `<a href="${link}">🔗 ${new URL(link).hostname}</a>`).join('\n')
     : 'None';
 
-  const tradeLink = `https://mevx.io/solana/${token.address}?ref=aV2RYY3VcBKW`;
-  const replyMarkup = { inline_keyboard: [[{ text: 'Trade', url: tradeLink }]] };
+  // Định nghĩa các liên kết giao dịch với token.address
+  const mevxWebLink = `https://mevx.io/solana/${token.address}?ref=aV2RYY3VcBKW`;
+  const mevxTeleLink = `https://t.me/Mevx?start=aV2RYY3VcBKW&address=${token.address}`;
+  const bullxLink = `https://neo.bullx.io/terminal?chainId=1399811149&address=${token.address}&r=access_24IR0BUEMF9`;
+  const trojanLink = `https://t.me/odysseus_trojanbot?start=r-strongggt-${token.address}pump`;
+  const metaSolanaLink = `https://t.me/MetaSolanaBot?start=22WPWXZE&address=${token.address}`;
+  const solTradingBotLink = `https://t.me/SolTradingBot?start=WAKa0XTVQ&address=${token.address}`;
+  const chartLink = `https://dexscreener.com/solana/${token.address}`;
+
+  // Cấu hình inline keyboard với các nút
+  const replyMarkup = {
+    inline_keyboard: [
+      [
+        { text: '📊 Chart', url: chartLink },
+      ],
+      [
+        { text: '🌐 Trade Mevx Web', url: mevxWebLink },
+        { text: '🤖 Trade Mevx Tele', url: mevxTeleLink },
+      ],
+      [
+        { text: '🦁 Trade Bullx', url: bullxLink },
+        { text: '🐸 Trade Trojan', url: trojanLink },
+      ],
+      [
+        { text: '🦍 Trade MetaSolana Bot', url: metaSolanaLink },
+        { text: '🦄 Trade Sol TradingBot', url: solTradingBotLink },
+      ],
+    ],
+  };
 
   let message = `🟢🟢 New Gem Tracking 🟢🟢\n\n- Address: <code>${token.address}</code>\n- Symbol: ${token.symbol}\n- Name: ${token.name}\n- Mcap: ${Number(token.mcap).toLocaleString()} USD\n- Social Links: ${socialLinksText}`;
 
