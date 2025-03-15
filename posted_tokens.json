@@ -82,5 +82,11 @@
     "timestamp": "2025-03-15T13:10:40.658Z",
     "initialMcap": 237590,
     "telegramMessageId": 420
+  },
+  {
+    "address": "G9MPx3NDgtYoq4vHTsACpgqoLxgohCjc6x7YbMVEpump",
+    "timestamp": "2025-03-15T13:55:53.857Z",
+    "initialMcap": 54314,
+    "telegramMessageId": 432
   }
 ]
